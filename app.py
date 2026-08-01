@@ -11,43 +11,62 @@ st.write("ඔබගේ මුහුණේ Emotion එක (හැඟීම) ස�
 EMOTIONS = ['Neutral', 'Happiness', 'Surprise', 'Sadness', 'Anger', 'Disgust', 'Fear', 'Contempt']
 AGE_BUCKETS = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 
-# Safe File Download Helper Function
-def download_file(url, target_path, min_size=1000):
-    # පැරණි/වැරදි File එකක් තිබේ නම් අයින් කිරීම
+# Multi-mirror file downloader with auto retry
+def download_file_with_fallbacks(urls, target_path, min_size=500):
+    if os.path.exists(target_path) and os.path.getsize(target_path) >= min_size:
+        return
+        
     if os.path.exists(target_path):
-        if os.path.getsize(target_path) < min_size:
-            os.remove(target_path)
+        os.remove(target_path)
+        
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    for url in urls:
+        try:
+            res = requests.get(url, headers=headers, stream=True, timeout=15)
+            if res.status_code == 200:
+                with open(target_path, "wb") as f:
+                    for chunk in res.iter_content(chunk_size=65536):
+                        f.write(chunk)
+                if os.path.getsize(target_path) >= min_size:
+                    return
+        except Exception:
+            continue
             
-    if not os.path.exists(target_path):
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url, headers=headers, stream=True)
-        if res.status_code == 200:
-            with open(target_path, "wb") as f:
-                for chunk in res.iter_content(chunk_size=65536):
-                    f.write(chunk)
-        else:
-            raise Exception(f"Failed to download {target_path} (HTTP {res.status_code})")
+    raise Exception(f"Failed to download valid file for {target_path} from all sources.")
 
 @st.cache_resource
 def load_models():
     # 1. Download Face Cascade
     cascade_path = "haarcascade_frontalface_default.xml"
-    download_file("https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml", cascade_path, min_size=100000)
+    download_file_with_fallbacks(
+        ["https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"],
+        cascade_path, min_size=100000
+    )
     face_cascade = cv2.CascadeClassifier(cascade_path)
 
     # 2. Download Emotion ONNX Model
     model_path = "emotion-ferplus-8.onnx"
-    download_file("https://media.githubusercontent.com/media/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx", model_path, min_size=1000000)
+    download_file_with_fallbacks(
+        ["https://media.githubusercontent.com/media/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"],
+        model_path, min_size=1000000
+    )
     emotion_net = cv2.dnn.readNetFromONNX(model_path)
 
-    # 3. Download Original GilLevi Caffe Age Models
-    age_proto = "deploy_age.prototxt"
+    # 3. Download Age Detector Models from HuggingFace / GitHub Backup
+    age_proto = "age_deploy.prototxt"
     age_model = "age_net.caffemodel"
     
-    download_file("https://raw.githubusercontent.com/GilLevi/AgeGenderDeepLearning/master/models/deploy_age.prototxt", age_proto, min_size=500)
-    download_file("https://raw.githubusercontent.com/GilLevi/AgeGenderDeepLearning/master/models/age_net.caffemodel", age_model, min_size=40000000)
+    download_file_with_fallbacks([
+        "https://huggingface.co/AjaySharma/genderDetection/raw/main/age_deploy.prototxt",
+        "https://raw.githubusercontent.com/prajnasb/observations/master/experiements/data/age_detector/age_deploy.prototxt"
+    ], age_proto, min_size=400)
+    
+    download_file_with_fallbacks([
+        "https://huggingface.co/AjaySharma/genderDetection/resolve/main/age_net.caffemodel",
+        "https://github.com/prajnasb/observations/raw/master/experiements/data/age_detector/age_net.caffemodel"
+    ], age_model, min_size=40000000)
 
-    age_net = cv2.dnn.readNet(age_proto, age_model)
+    age_net = cv2.dnn.readNetFromCaffe(age_proto, age_model)
 
     return face_cascade, emotion_net, age_net
 
