@@ -12,17 +12,26 @@ EMOTIONS = ['Neutral', 'Happiness', 'Surprise', 'Sadness', 'Anger', 'Disgust', '
 
 @st.cache_resource
 def load_models():
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    # 1. Download Haar Cascade XML File directly
+    cascade_path = "haarcascade_frontalface_default.xml"
+    if not os.path.exists(cascade_path):
+        cascade_url = "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"
+        res = requests.get(cascade_url)
+        with open(cascade_path, "wb") as f:
+            f.write(res.content)
+            
+    face_cascade = cv2.CascadeClassifier(cascade_path)
     
+    # 2. Download ONNX Emotion Model directly
     model_path = "emotion-ferplus-8.onnx"
     if not os.path.exists(model_path):
-        url = "https://raw.githubusercontent.com/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"
+        model_url = "https://raw.githubusercontent.com/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, stream=True)
+        response = requests.get(model_url, headers=headers, stream=True)
         with open(model_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-            
+                
     emotion_net = cv2.dnn.readNetFromONNX(model_path)
     return face_cascade, emotion_net
 
