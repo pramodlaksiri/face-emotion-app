@@ -12,7 +12,7 @@ EMOTIONS = ['Neutral', 'Happiness', 'Surprise', 'Sadness', 'Anger', 'Disgust', '
 
 @st.cache_resource
 def load_models():
-    # 1. Download Haar Cascade XML File directly
+    # 1. Download Haar Cascade XML File
     cascade_path = "haarcascade_frontalface_default.xml"
     if not os.path.exists(cascade_path):
         cascade_url = "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"
@@ -22,10 +22,15 @@ def load_models():
             
     face_cascade = cv2.CascadeClassifier(cascade_path)
     
-    # 2. Download ONNX Emotion Model directly
+    # 2. Download Direct Binary ONNX Model via GitHub Media URL
     model_path = "emotion-ferplus-8.onnx"
+    
+    # කලින් Download වූ පැරණි/Text File එකක් තිබේ නම් අයින් කිරීම
+    if os.path.exists(model_path) and os.path.getsize(model_path) < 100000:
+        os.remove(model_path)
+        
     if not os.path.exists(model_path):
-        model_url = "https://raw.githubusercontent.com/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"
+        model_url = "https://media.githubusercontent.com/media/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(model_url, headers=headers, stream=True)
         with open(model_path, "wb") as f:
