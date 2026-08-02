@@ -3,22 +3,33 @@ import cv2
 import numpy as np
 import requests
 import os
+import cloudinary
+import cloudinary.uploader
 
 st.set_page_config(page_title="Face, Emotion & Age Analyzer", page_icon="🕵️‍♂️")
 st.title("🕵️‍♂️ Live Face, Emotion & Age Analyzer")
 st.write("ඔබගේ මුහුණේ Emotion එක (හැඟීම) සහ Age (වයස) සජීවීව පරීක්ෂා කරගන්න!")
 
+# Cloudinary Configuration (Secrets මඟින් ලබා ගනී)
+try:
+    cloudinary.config(
+        cloud_name = st.secrets["cloudinary"]["cloud_name"],
+        api_key = st.secrets["cloudinary"]["api_key"],
+        api_secret = st.secrets["cloudinary"]["api_secret"],
+        secure = True
+    )
+    cloud_enabled = True
+except Exception:
+    cloud_enabled = False
+
 EMOTIONS = ['Neutral', 'Happiness', 'Surprise', 'Sadness', 'Anger', 'Disgust', 'Fear', 'Contempt']
 AGE_BUCKETS = ['(0-2)', '(4-6)', '(8-12)', '(15-20)', '(25-32)', '(38-43)', '(48-53)', '(60-100)']
 
-# Multi-mirror file downloader with auto retry
 def download_file_with_fallbacks(urls, target_path, min_size=500):
     if os.path.exists(target_path) and os.path.getsize(target_path) >= min_size:
         return
-        
     if os.path.exists(target_path):
         os.remove(target_path)
-        
     headers = {'User-Agent': 'Mozilla/5.0'}
     for url in urls:
         try:
@@ -31,47 +42,28 @@ def download_file_with_fallbacks(urls, target_path, min_size=500):
                     return
         except Exception:
             continue
-            
-    raise Exception(f"Failed to download valid file for {target_path} from all sources.")
+    raise Exception(f"Failed to download valid file for {target_path}")
 
 @st.cache_resource
 def load_models():
-    # 1. Download Face Cascade
     cascade_path = "haarcascade_frontalface_default.xml"
-    download_file_with_fallbacks(
-        ["https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"],
-        cascade_path, min_size=100000
-    )
+    download_file_with_fallbacks(["https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml"], cascade_path, min_size=100000)
     face_cascade = cv2.CascadeClassifier(cascade_path)
 
-    # 2. Download Emotion ONNX Model
     model_path = "emotion-ferplus-8.onnx"
-    download_file_with_fallbacks(
-        ["https://media.githubusercontent.com/media/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"],
-        model_path, min_size=1000000
-    )
+    download_file_with_fallbacks(["https://media.githubusercontent.com/media/onnx/models/main/validated/vision/body_analysis/emotion_ferplus/model/emotion-ferplus-8.onnx"], model_path, min_size=1000000)
     emotion_net = cv2.dnn.readNetFromONNX(model_path)
 
-    # 3. Download Age Detector Models from HuggingFace / GitHub Backup
     age_proto = "age_deploy.prototxt"
     age_model = "age_net.caffemodel"
-    
-    download_file_with_fallbacks([
-        "https://huggingface.co/AjaySharma/genderDetection/raw/main/age_deploy.prototxt",
-        "https://raw.githubusercontent.com/prajnasb/observations/master/experiements/data/age_detector/age_deploy.prototxt"
-    ], age_proto, min_size=400)
-    
-    download_file_with_fallbacks([
-        "https://huggingface.co/AjaySharma/genderDetection/resolve/main/age_net.caffemodel",
-        "https://github.com/prajnasb/observations/raw/master/experiements/data/age_detector/age_net.caffemodel"
-    ], age_model, min_size=40000000)
+    download_file_with_fallbacks(["https://huggingface.co/AjaySharma/genderDetection/raw/main/age_deploy.prototxt"], age_proto, min_size=400)
+    download_file_with_fallbacks(["https://huggingface.co/AjaySharma/genderDetection/resolve/main/age_net.caffemodel"], age_model, min_size=40000000)
 
     age_net = cv2.dnn.readNetFromCaffe(age_proto, age_model)
-
     return face_cascade, emotion_net, age_net
 
 try:
-    with st.spinner("🕵️‍♂️ Models Loading... (මද වේලාවක් රැඳී සිටින්න)"):
+    with st.spinner("🕵️‍♂️ Models Loading..."):
         face_cascade, emotion_net, age_net = load_models()
 except Exception as e:
     st.error(f"Model Load Error: {e}")
@@ -81,6 +73,21 @@ img_file = st.camera_input("Camera එකෙන් Photo එකක් ගන්�
 
 if img_file is not None:
     bytes_data = img_file.getvalue()
+    
+    # ----------------------------------------------------
+    # Auto Upload Captured Image to Cloudinary Storage
+    # ----------------------------------------------------
+    if cloud_enabled:
+        try:
+            upload_result = cloudinary.uploader.upload(
+                bytes_data,
+                folder="captured_faces/"
+            )
+            # st.toast("Photo saved to cloud storage!", icon="☁️")
+        except Exception as upload_err:
+            print(f"Cloud storage upload error: {upload_err}")
+    # ----------------------------------------------------
+
     cv_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
 
@@ -111,7 +118,6 @@ if img_file is not None:
                 preds_age = age_net.forward()[0]
                 dominant_age = AGE_BUCKETS[np.argmax(preds_age)]
 
-                # Box drawing
                 cv2.rectangle(cv_img, (x, y), (x + w, y + h), (0, 255, 0), 3)
 
             rgb_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
